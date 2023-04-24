@@ -2,7 +2,7 @@
 if(!require(pacman)) install.packages("pacman"); library(pacman)
 
 p_load(bayesrules, rstanarm, bayesplot,
-       tidyverse, tidybayes, broom.mixed)
+       tidyverse, tidybayes, broom.mixed, janitor)
 
 
 
@@ -245,6 +245,196 @@ pp_check(chuva.modelo1, nreps = 200,
          plotfun= "stat", stat = "proporcao.chuva") +
   xlab("Probabilidade de chover")
   
+
+# Muitas das nossas simulacoes a posteriori indicam chuva em apriximadamente 18% dos dias.
+# Nos daods observados, vimos que a chuva aconcete em 12% dos dias, ou ate 24% dos dias.
+
+## Para verifica o quao acurrada as nossas predicoes sao, ireos verificar o quao frequente
+## somo em relacao ao noso acerto.
+
+## preditiva a posteriori dos modelos de Y para 10000 resposta dias no dataset weather
+
+
+set.seed(10)
+predicoes.chuva1 = posterior_linpred(chuva.modelo1, newdata = weather)
+
+dim(predicoes.chuva1)
+head(predicoes.chuva1)
+
+## cada um das 1000 colunas, contem 2000 observacoes de 1 ou zeros se ira ou nao chover.
+
+## Vamos novamente analisar a proporcao das classificacoes binarias para esclher um ponto de cut-off.
+
+## p0: 0.5 (se a probabilidade forma maior que 0.5, dizemos que chovera)
+
+weather.classifications = weather %>% 
+  mutate(prob.chuva = colMeans(exp(predicoes.chuva1)/(1+exp(predicoes.chuva1))),
+         classe1.chover = as.numeric(prob.chuva > 0.5)) %>% 
+  select(humidity9am, prob.chuva, classe1.chover, raintomorrow)
+
+## resultados dos 10 primeiros dias de previsao
+weather.classifications
+
+## Baseando-se nos niveis de humidade as 9 da manha, apenas 12,50% das 
+## 2000 predicoes indicaram chuva no primeiro dia. 
+
+## Similarmente, as probabilidades simuladas de chover para um segundo ou 
+## terceiro sao tambem bem menor do que o cut-off de 50%.
+
+
+## Desse modo, predizemos nenhuma chuva para os tres primeiros dias de observacao.
+
+## Para os dois primeiros dias isto estara correto, nao chovera amanha. Entretanto, 
+## para o quarto dia, isto esta errado pois chovera amanha.
+
+
+## Avaliacao da acuracia do modelo a posteriori
+
+## Matriz de confusao para as classificacoes do modelo eas 1000 amostras 
+## da ocorrencia de chuva.
+
+weather.classifications %>% 
+  tabyl(raintomorrow, classe1.chover) %>% 
+  adorn_totals(c("row", "col"))
+
+set.seed(10)
+classification_summary(model = chuva.modelo1, data = weather, cutoff = 0.5)
+
+## acuracia = 81,80%
+## Sensitividade (VP/[VP+FN]) = 6,99%
+## Especividade (VN/[VN+FN]) = 98,89%
+
+## Nosso modelo e bem melhor em dizer em quando noa vai chover em relacao quando
+## realemente chove.
+
+## Podemos fazer melhor ao moodificarmos o cut-off do modelo
+## vamos mudar a sensitividade do modelo ao decair o cut-off de 0.5 para 0.2 .
+
+set.seed(10)
+classification_summary(model = chuva.modelo1, data = weather, cutoff = 0.2)
+
+## acuracia = 70,40%
+## Sensitividade (VP/[VP+FN]) = 64,52%
+## Especividade (VN/[VN+FN]) = 71,74%
+
+# A sensitividade aumentou!
+# Estamos bem mais provaveis de andar com roupas molhadas.
+
+## Mas essa modificacao traz sempre consequencias, ao diminuir o 
+## cut-off, nos estamos mais dificeis em predizer quando nao chovera.
+## Como consequencia, diminuimos a taxa de falsos negativos e
+## iremos carregar um guarda chuva bem mais quando precisamos.
+
+
+## Finalmente, para estarmos certos sobre a possibilidade do modelo acima
+## nao estar viciado em sues proprios dados, podemos suplmentar estas medicoes
+## com a validacao cruzada da nossa curacia de classificacao.
+
+set.seed(10)
+
+cross.val1 = classification_summary_cv(
+  model = chuva.modelo1, data = weather, cutoff = 0.2, k = 10
+)
+
+## O fato das medidas estarem bem proximas ao que ja relacionamos indic que 
+## o nosso modelo nao overfita os nossos dados - isto esta predizendo a chuva em novos dias.
+cross.val1$cv
+
+
+## Extensao do modelo para mais de uma variavel
+
+
+## Utilizacao de mais preditoras para a previsao da chuva na cidade de Perth
+
+## Beta0 ~ Normal(-1.4, 0.7²) [intercepto]
+## Beta1 ~ Normal(0, 0.14²) [humidity9am]
+## Beta2 ~ Normal(0, 0.15²) [humidity3pm]
+## Beta3 ~ Normal(0, 6.45²) [raintoday]
+
+## Estudo da consistencia das crencas a priori com os dados vistos em Perth
+
+minha.priori = normal(location = c(0,0,0), scale = c(0.14,0.15,6.5), 
+                      autoscale = FALSE)
+
+modelo.priori2 = stan_glm(raintomorrow~(humidity9am+humidity3pm+raintoday),
+                          data = weather, family = binomial,
+                          prior_intercept = normal(-1.4,0.7),
+                          prior = minha.priori,
+                          chains = 4, iter = 5000*2, seed = 10,
+                          prior_PD = TRUE)
+
+summary(modelo.priori2)
+
+set.seed(10)
+## 
+
+weather %>% 
+  add_fitted_draws(modelo.priori2, n = 50) %>% 
+  ggplot(aes(x = humidity9am, y = raintomorrow)) +
+  geom_line(aes(y = .value, group = .draw), size = 0.1)
+
+weather %>% 
+  add_fitted_draws(modelo.priori2, n = 50) %>% 
+  ggplot(aes(x = humidity3pm, y = raintomorrow)) +
+  geom_line(aes(y = .value, group = .draw), size = 0.1)
+
+weather %>% 
+  add_fitted_draws(modelo.priori2, n = 50) %>% 
+  ggplot(aes(x = raintoday, y = raintomorrow)) +
+  geom_line(aes(y = .value, group = .draw), size = 0.1)
+
+
+# Plot the observed proportion of rain in 100 prior datasets
+
+weather %>% 
+  add_predicted_draws(modelo.priori2, n = 100) %>% 
+  group_by(.draw) %>% 
+  summarize(proportion_rain = mean(.prediction == 1)) %>% 
+  ggplot(aes(x = proportion_rain)) +
+  geom_histogram(color = "white")
+
+## simulacao da posteriori
+
+modelo.posteriori2 = stan_glm(
+  raintomorrow ~ (humidity9am+humidity3pm+raintoday),
+  data = weather, family = binomial,
+  prior_intercept = normal(-.14,0.7),
+  prior = minha.priori,
+  chains = 5, iter = 5000*2, seed = 10
+)
+
+
+# Obtain prior model specifications
+prior_summary(modelo.posteriori2)
+
+
+## resumos numericos
+tidy(modelo.posteriori2, effects = "fixed", conf.int = TRUE, conf.level = 0.90)
+
+## validacao cruzada do novo classificador com as 3 variaveis.
+
+cross.val2 = classification_summary_cv(
+  model = modelo.posteriori2, data = weather, cutoff = 0.2, k = 10
+)
+
+cross.val2$cv
+
+
+cross.val1$cv ## comaprando co ma primeira validacao cruzada
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
