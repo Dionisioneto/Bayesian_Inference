@@ -1,0 +1,23 @@
+---
+title: "Bayesian Logistic Regression"
+author: "Dionisio Neto"
+date: "2024-01-26"
+output: html_document
+---
+
+## **Bibliotecas**
+
+```{r message=F}
+library(tidyverse)
+library(lubridate)
+```
+
+## **Dados**
+
+```{r}
+dados = mtcars
+```
+
+```{r}
+summary(mtcars)
+```
