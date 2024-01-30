@@ -111,6 +111,8 @@ $$
 \text{Dados:} \quad Y_{i} \mid \beta_{0}, \beta_{1}, \beta_{2}, \beta_{3} \overset{indep.}{\sim} Poisson (\lambda_{i}), \; \text{com} \quad
 log(\lambda_i) = \beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3}
 $$
+\\ 
+\\
 
 $$
 Proris:          \quad      \beta_{0} \sim Normal(2,0.5^2) \\
@@ -118,69 +120,82 @@ Proris:          \quad      \beta_{0} \sim Normal(2,0.5^2) \\
 \quad\quad\quad   \quad      \beta_{2} \sim Normal(0,4.97^2) \\
 \quad\quad\quad   \quad      \beta_{3} \sim Normal(0,5.60^2)
 $$
+Para examinar se essas distribuições a priori combinados refletem com precisão nossa compreensão incerta das leis estaduais, simularemos 20.000 amostras do modelo a priori formado pelo vetor de parâmetros $(\beta_{0}, \beta_{1}, \beta_{2}, \beta_{3})$. 
 
+```{r message=FALSE, error=FALSE}
+priori_beta0 = normal(2, 0.5)
+priori_betas = normal(location = c(0,0,0), scale = c(0.17, 4.97, 5.60),
+                      autoscale = FALSE)
 
-
-Vignettes are long form documentation commonly included in packages. Because
-they are part of the distribution of the package, they need to be as compact as
-possible. The `html_pretty` output format in package
-[**prettydoc**](https://github.com/yixuan/prettydoc/) , an alternative
-to `html_document` and `html_vignette` contained in the `rmarkdown` package,
-is able to generate small and nice HTML pages.
-
-## Styles
-
-Currently `html_pretty` supports three page themes, `cayman` (the default),
-`tactile`, and `architect`. And there are also two syntax highlight styles:
-`github` to mimic the syntax highlight on Github, and `vignette` that is used by
-`html_vignette`. If no highlight parameter is given, the default style created
-by Pandoc will be used.
-
-The theme and highlight styles can be given in the document metadata,
-for example:
-
-```yaml
-output:
-  prettydoc::html_pretty:
-    theme: cayman
-    highlight: github
+modelo_priori_eq = stan_glm(laws ~ percent_urban + historical,
+                            data = deq,
+                            family = poisson,
+                            prior_intercept = priori_beta0,
+                            prior = priori_betas,
+                            chains = 4, iter = 5000*2, seed = 12,
+                            prior_PD = T) ## indica que queremos plotar/trabalhar com informações da nossa priori
 ```
 
-## Happy Knitting!
+Vamos extrair as informações das nossas prioris
 
-Feel free to use the `knitr` infrastructure with dozens of tunable options in
-your package vignette.
-
-```{r fig.width=6, fig.height=6, fig.align='center'}
-set.seed(123)
-n <- 1000
-x1  <- matrix(rnorm(n), ncol = 2)
-x2  <- matrix(rnorm(n, mean = 3, sd = 1.5), ncol = 2)
-x   <- rbind(x1, x2)
-head(x)
-smoothScatter(x, xlab = "x1", ylab = "x2")
+```{r}
+prior_summary(modelo_priori_eq)
 ```
 
-You can also include code snippets of languages other than R, but note that
-the block header has no curly brackets around the language name.
+Vamos simular a ocorrência de 100 modelos a priori possíveis, $\exp\{\beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3}\}$.
 
-```cpp
-// [[Rcpp::export]]
-NumericVector timesTwo(NumericVector x) {
-    return x * 2;
-}
+
+```{r}
+deq %>% 
+  add_fitted_draws(model=modelo_priori_eq, n = 100) %>%
+  ggplot(aes(x = percent_urban, y = laws, color = historical)) +
+    geom_line(aes(y = .value, group = paste(historical, .draw))) + 
+    ylim(0, 100)
 ```
 
-You can write math expressions, e.g. $Y = X\beta + \epsilon$,
-footnotes^[A footnote here.], and tables, e.g. using `knitr::kable()`.
+As curvas em confusão reletem a nossa incerteza a priori!
 
-```{r, echo=FALSE, results='asis'}
-knitr::kable(head(iris, 10))
+
+Estas estão espalhadas por todo o gráfico, indicando que o número de leis pode aumentar ou diminuir com a população urbana e pode ou não diferir de acordo com as tendências históricas de votação. Nós realmente não sabemos!
+
+
+## Simulação da distribuição a posteriori
+
+
+```{r simulacao posteriori, message=F}
+
+eq_post_model = update(modelo_priori_eq, prior_PD=FALSE) ## Simulação da posteriori
+
+```
+Vamos verificar a convergência de nossas cadeias!
+
+```{r}
+mcmc_trace(eq_post_model)
 ```
 
-## Stay Tuned
+```{r}
+mcmc_dens_overlay(eq_post_model)
+```
+```{r}
+mcmc_acf(eq_post_model)
+```
 
-Please visit the [development page](https://github.com/yixuan/prettydoc/) of the 
-`prettydoc` package for latest updates and news. Comments, bug reports and
-pull requests are always welcome.
+## Verificação 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
