@@ -1,0 +1,186 @@
+---
+title: "Regressão Poisson Bayesiana"
+author: "Dionisio Alves da Silva Neto"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: architect
+    highlight: github
+vignette: >
+  %\VignetteIndexEntry{Vignette Title}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+**Construção do modelo de Regressão Poisson**
+
+### Especificação do modelo estatístico
+
+- O modelo Possion é apropriado para a modelagem de contagens de eventos que acontecem em um intervalo de tempo (variável aleatória discreta).
+
+- De acordo com a sua definição, esta contagem teoricamente não tem uma cota superior, isto é, os seus valores discretos podem ser de 0 a $+\infty$.
+
+Exemplo aplicado:
+
+No momento em que este livro foi escrito, a Lei da Igualdade estava no Senado dos Estados Unidos aguardando consideração. Se aprovado, esta lei ou projeto de lei garantiria os direitos LGBTQ+ básicos a nível nacional, proibindo a discriminação na educação, no emprego, na habitação e muito mais. Atualmente, cada um dos 50 estados tem o seu próprio conjunto de leis anti-discriminação únicas, abrangendo questões que vão desde o combate ao bullying até à cobertura de cuidados de saúde. 
+
+ - **Objetivo**: Compreender melhor como o número de leis em um estado se relaciona com suas características demográficas e clima político únicos. Para o primeiro, restringiremos nosso foco à porcentagem de residentes de um estado que residem em área urbana.
+
+
+- Para este último, utilizaremos padrões históricos de votação nas eleições presidenciais, observando se um estado votou consistentemente no candidato democrata, votou consistentemente no candidato republicano “GOP”57 ou é um estado indeciso que mudou de um lado para o outro. Ao longo da nossa análise, reconheça que o número de leis não é um indicador perfeito da qualidade das leis de um estado – apenas fornece um ponto de partida para a compreensão de como as leis variam de estado para estado.
+
+
+Para cada um dos 50 estados, vamos denotar o nosso conjunto de dados como:
+
+$Y_{i}$: O número de leis antidiscriminatórias LGBTQ+;
+$X_{i1}$: O percentual de residentes no estados cujos vivem em áreas urbanas.
+$X_{i2}$: A variável histórica preditora do clima político do tipo categórica com três níveis: Democrata, Partido Republicano ou indeciso. 
+
+Para a variável $X_{i2}$, precisaremos criar variáveis duas novas variáveis dummy com uma categorias sendo a de referência. Para o nosso caso, a categoria democrática será considerada como *baseline* e teremos a seguinte formação:
+
+$$
+X_{i2} = \begin{cases}
+          1, \text{caso o estado seja Partido Republicano}; \\
+          0, \text{caso contrário}.
+          \end{cases}
+$$
+$$
+X_{i3} = \begin{cases}
+          1, \text{caso o estado seja Partido Indeciso}; \\
+          0, \text{caso contrário}.
+          \end{cases}
+$$
+
+## Especificação do modelo dos Dados
+
+De acordo com a nossa variável resposta do modo discreto, vamos assumir o modelo Poisson. A distribuição Poisson é especial ao lidar com dados de contagem nos quais os valores apresentam assimetria à direita e, que não podem ser aproximados facilmente pela distribuição Normal.
+
+Como $Y_{i}$ representa o número de leis antidiscriminatórias LGBTQ+, no qual cada estado apresenta uma taxa de leis antidicriminatórias $(\lambda_{i})$, dependente de fatores demográficos e de voto $(X_{i1}, X_{i2}, X_{i3})$, denotamos:
+
+$$
+Y_{i} \mid \lambda_{i} \overset{indep.}{\sim} Poisson \, (\lambda_{i})
+$$
+
+ Sob este modelo Poisson, modelamos o valor esperado do número de leis antidiscriminatórias nos etados, captrado pela taxa $\lambda_{i}$.
+ 
+$$
+E(Y_{i} \mid \lambda_{i}) = \lambda_{i}
+$$
+
+Logo, para a componente simstemática (preditor linear), utilizamos a seguinte combinação linear:
+
+ $$
+ \lambda_{i} = \beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3}
+ $$
+
+## **Carregamento de Bibliotecas Importantes**
+
+```{r message = FALSE}
+
+if(!require(pacman)) install.packages("pacman");library(pacman)
+
+p_load(bayesrules, rstanarm, bayesplot, tidyverse,
+       tidybayes, broom.mixed)
+```
+
+
+## **Conjunto de dados**
+
+
+```{r}
+data("equality_index")
+deq = equality_index
+```
+
+```{r, echo=FALSE, results='asis'}
+knitr::kable(head(deq, 10))
+```
+
+Quando consideramos que a esperança condiconal pode ser assumida através de uma combinação linear entre os efeitos e as covaráveis, podemos obter valores negativos. Portanto, precisamos de uma função de ligação que permita o retorno de valores apenas posivos, por conta disto, utilizaremos a função *logarítmica*. Por consequência, a interpetração dos parâmetros será feita por meio da função inversa do parâmetro (a função exponencial).
+
+$$
+log(\lambda_i) = \beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3} \quad \quad \quad \lambda_i = e^{\beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3}}
+$$
+## Especificações das distribuições a priori.
+
+Para completarmos o modelo bayesiano, precisamos expressar o entendimento a priori dos coefcentes de regressão $(\beta_{0}, \beta_{1}, \beta_{2}, \beta_{3})$. Visto que cada um pode assumr qualquer valor dentro da reta Real, é usual utilizar distribuições gaussianas como a priori indvidual de cada um. Vamos também assumir que o conhecimento a priori de cada um dos coefcientes é independente. 
+
+A representação completa do modelo de regressão Poisson Bayesiano para $Y_{i}$ é dado por:
+
+$$
+\text{Dados:} \quad Y_{i} \mid \beta_{0}, \beta_{1}, \beta_{2}, \beta_{3} \overset{indep.}{\sim} Poisson (\lambda_{i}), \; \text{com} \quad
+log(\lambda_i) = \beta_{0} + \beta_{1} X_{i1} + \beta_{2} X_{i2} + \beta_{3} X_{i3}
+$$
+
+$$
+Proris:          \quad      \beta_{0} \sim Normal(2,0.5^2) \\
+\quad\quad\quad   \quad      \beta_{1} \sim Normal(0,0.17^2) \\
+\quad\quad\quad   \quad      \beta_{2} \sim Normal(0,4.97^2) \\
+\quad\quad\quad   \quad      \beta_{3} \sim Normal(0,5.60^2)
+$$
+
+
+
+Vignettes are long form documentation commonly included in packages. Because
+they are part of the distribution of the package, they need to be as compact as
+possible. The `html_pretty` output format in package
+[**prettydoc**](https://github.com/yixuan/prettydoc/) , an alternative
+to `html_document` and `html_vignette` contained in the `rmarkdown` package,
+is able to generate small and nice HTML pages.
+
+## Styles
+
+Currently `html_pretty` supports three page themes, `cayman` (the default),
+`tactile`, and `architect`. And there are also two syntax highlight styles:
+`github` to mimic the syntax highlight on Github, and `vignette` that is used by
+`html_vignette`. If no highlight parameter is given, the default style created
+by Pandoc will be used.
+
+The theme and highlight styles can be given in the document metadata,
+for example:
+
+```yaml
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    highlight: github
+```
+
+## Happy Knitting!
+
+Feel free to use the `knitr` infrastructure with dozens of tunable options in
+your package vignette.
+
+```{r fig.width=6, fig.height=6, fig.align='center'}
+set.seed(123)
+n <- 1000
+x1  <- matrix(rnorm(n), ncol = 2)
+x2  <- matrix(rnorm(n, mean = 3, sd = 1.5), ncol = 2)
+x   <- rbind(x1, x2)
+head(x)
+smoothScatter(x, xlab = "x1", ylab = "x2")
+```
+
+You can also include code snippets of languages other than R, but note that
+the block header has no curly brackets around the language name.
+
+```cpp
+// [[Rcpp::export]]
+NumericVector timesTwo(NumericVector x) {
+    return x * 2;
+}
+```
+
+You can write math expressions, e.g. $Y = X\beta + \epsilon$,
+footnotes^[A footnote here.], and tables, e.g. using `knitr::kable()`.
+
+```{r, echo=FALSE, results='asis'}
+knitr::kable(head(iris, 10))
+```
+
+## Stay Tuned
+
+Please visit the [development page](https://github.com/yixuan/prettydoc/) of the 
+`prettydoc` package for latest updates and news. Comments, bug reports and
+pull requests are always welcome.
+
